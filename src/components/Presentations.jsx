@@ -1,433 +1,495 @@
 import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import PresentationViewer from "./PresentationViewer";
 
-// Place ce composant dans src/components/Presentations.jsx
-// Dans Dashboard.jsx : {activeNav === "presentations" && <Presentations user={user} />}
+const COLORS = [
+  { bg: "#EDE9FE", text: "#6366F1" },
+  { bg: "#E0F2FE", text: "#0284C7" },
+  { bg: "#FEF3C7", text: "#D97706" },
+  { bg: "#ECFDF5", text: "#059669" },
+  { bg: "#FEE2E2", text: "#DC2626" },
+  { bg: "#FCE7F3", text: "#DB2777" },
+];
 
-function Presentations({ user }) {
+function initials(name) {
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
+
+function colorFor(name) {
+  let hash = 0;
+  for (let c of name) hash = (hash * 31 + c.charCodeAt(0)) % COLORS.length;
+  return COLORS[hash];
+}
+
+function formatSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString("fr-FR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/* Déclenche la conversion pptx -> images sur le microservice.
+   Fire-and-forget : on ne bloque pas l'UI pendant la conversion. */
+async function triggerConversion(presentationId, filePath) {
+  const base = import.meta.env.VITE_CONVERT_URL;
+  if (!base) {
+    console.warn("VITE_CONVERT_URL non défini — conversion non déclenchée.");
+    return;
+  }
+  try {
+    await fetch(`${base}/convert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ presentationId, filePath }),
+    });
+  } catch (e) {
+    console.error("Conversion non démarrée :", e);
+  }
+}
+
+export default function Presentations() {
+  const navigate = useNavigate();
   const [presentations, setPresentations] = useState([]);
-  const [loading, setLoading]             = useState(true);
-  const [uploading, setUploading]         = useState(false);
-  const [viewingPres, setViewingPres]     = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [search, setSearch]               = useState("");
-  const [deleteId, setDeleteId]           = useState(null); // modal confirm
-  const [successMsg, setSuccessMsg]       = useState("");
-  const [errorMsg, setErrorMsg]           = useState("");
-  const [dragOver, setDragOver]           = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [renameId, setRenameId] = useState(null);
+  const [renameName, setRenameName] = useState("");
+  const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef();
 
-  // ── Fetch presentations ──
-  const fetchPresentations = async () => {
-    setLoading(true);
+  useEffect(() => {
+    fetchPresentations();
+  }, []);
+
+  /* Tant qu'une présentation est en cours de conversion (slides_ready=false),
+     on rafraîchit automatiquement pour mettre à jour son statut. */
+  useEffect(() => {
+    const pending = presentations.some((p) => !p.slides_ready);
+    if (!pending) return;
+    const t = setTimeout(fetchPresentations, 4000);
+    return () => clearTimeout(t);
+  }, [presentations]);
+
+  async function fetchPresentations() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     const { data, error } = await supabase
       .from("presentations")
       .select("*")
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
-
-    if (error) { setErrorMsg(error.message); }
-    else { setPresentations(data); }
+    if (!error) setPresentations(data || []);
     setLoading(false);
-  };
+  }
 
-  useEffect(() => { fetchPresentations(); }, []);
-
-  // ── Upload avec XHR pour vraie progression en temps réel ──
-  // Limite portée à 200 Mo (configurer aussi dans Supabase Dashboard > Storage)
-  const MAX_SIZE_MB = 200;
-
-  const handleUpload = async (file) => {
+  async function handleUpload(file) {
     if (!file) return;
-
-    const allowed = [
-      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "application/pdf",
-    ];
-    if (!allowed.includes(file.type)) {
-      setErrorMsg("Format non supporté. Accepté : .pptx et .pdf uniquement.");
-      return;
-    }
-    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      setErrorMsg(`Fichier trop lourd. Maximum ${MAX_SIZE_MB} Mo.`);
+    if (!file.name.endsWith(".pptx")) {
+      setError("Seuls les fichiers .pptx sont acceptés.");
       return;
     }
 
     setUploading(true);
-    setUploadProgress(0);
-    setErrorMsg("");
+    setError("");
 
-    const ext      = file.name.split(".").pop().toLowerCase();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = `${user.id}/${Date.now()}_${safeName}`;
-
-    try {
-      // ── Obtenir l'URL d'upload signée (upload direct sans passer par le client Supabase JS)
-      const { data: uploadUrlData, error: urlErr } = await supabase.storage
-        .from("presentations")
-        .createSignedUploadUrl(filePath);
-
-      if (urlErr) throw new Error(urlErr.message);
-
-      // ── Upload XHR avec progression réelle ──
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-
-        xhr.upload.addEventListener("progress", (e) => {
-          if (e.lengthComputable) {
-            // La progression XHR = 0→90%, les 10% restants = insertion BDD
-            const pct = Math.round((e.loaded / e.total) * 90);
-            setUploadProgress(pct);
-          }
-        });
-
-        xhr.addEventListener("load", () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve();
-          else reject(new Error(`Upload échoué (${xhr.status})`));
-        });
-        xhr.addEventListener("error", () => reject(new Error("Erreur réseau")));
-        xhr.addEventListener("abort", () => reject(new Error("Upload annulé")));
-
-        xhr.open("PUT", uploadUrlData.signedUrl);
-        xhr.setRequestHeader("Content-Type", file.type);
-        xhr.send(file);
-      });
-
-      setUploadProgress(92);
-
-      // ── URL signée longue durée pour lecture ──
-      const { data: readUrl } = await supabase.storage
-        .from("presentations")
-        .createSignedUrl(filePath, 60 * 60 * 24 * 365);
-
-      setUploadProgress(96);
-
-      // ── Insérer les métadonnées en base ──
-      const { error: dbError } = await supabase.from("presentations").insert({
-        user_id:   user.id,
-        name:      file.name.replace(/\.[^/.]+$/, ""),
-        file_url:  readUrl?.signedUrl || filePath,
-        file_type: ext,
-        file_size: file.size,
-      });
-
-      if (dbError) throw new Error(dbError.message);
-
-      setUploadProgress(100);
-      showSuccess("Présentation importée avec succès !");
-      fetchPresentations();
-
-    } catch (err) {
-      setErrorMsg(err.message);
-    } finally {
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
+      setError("Vous devez être connecté pour importer un fichier.");
       setUploading(false);
-      setTimeout(() => setUploadProgress(0), 1000);
+      return;
     }
-  };
 
-  // ── Supprimer ──
-  const handleDelete = async (pres) => {
-    // Supprimer le fichier du storage
-    const filePath = `${user.id}/${pres.file_url.split("/").pop()}`;
-    await supabase.storage.from("presentations").remove([filePath]);
+    const timestamp = Date.now();
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = `${user.id}/${timestamp}_${safeName}`;
 
-    // Supprimer de la base
+    const { error: uploadErr } = await supabase.storage
+      .from("presentations")
+      .upload(filePath, file, { upsert: false });
+
+    if (uploadErr) {
+      setError(`Erreur Storage : ${uploadErr.message}`);
+      setUploading(false);
+      return;
+    }
+
+    /* Insert AVEC récupération de la ligne créée (pour avoir l'id) */
+    const { data: inserted, error: dbErr } = await supabase
+      .from("presentations")
+      .insert({
+        user_id: user.id,
+        name: file.name.replace(".pptx", ""),
+        file_path: filePath,
+        file_size: file.size,
+        slides_ready: false,
+      })
+      .select()
+      .single();
+
+    if (dbErr) {
+      setError(`Erreur base de données : ${dbErr.message}`);
+      await supabase.storage.from("presentations").remove([filePath]);
+    } else {
+      /* Lance la conversion en arrière-plan, puis rafraîchit la liste */
+      triggerConversion(inserted.id, filePath);
+      fetchPresentations();
+    }
+
+    setUploading(false);
+  }
+
+  async function handleDelete(pres) {
+    if (!window.confirm(`Supprimer "${pres.name}" ?`)) return;
+    await supabase.storage.from("presentations").remove([pres.file_path]);
+    /* Nettoie aussi les images générées */
+    if (pres.slide_count) {
+      const slidePaths = Array.from({ length: pres.slide_count }, (_, i) =>
+        `${pres.id}/${String(i + 1).padStart(3, "0")}.png`
+      );
+      await supabase.storage.from("slides").remove(slidePaths);
+    }
+    await supabase.from("presentations").delete().eq("id", pres.id);
+    setPresentations((prev) => prev.filter((p) => p.id !== pres.id));
+  }
+
+  async function handleRename(pres) {
+    if (!renameName.trim() || renameName === pres.name) {
+      setRenameId(null);
+      return;
+    }
     const { error } = await supabase
       .from("presentations")
-      .delete()
+      .update({ name: renameName.trim(), updated_at: new Date() })
       .eq("id", pres.id);
-
-    if (error) { setErrorMsg(error.message); }
-    else {
-      showSuccess("Présentation supprimée.");
-      setPresentations((prev) => prev.filter((p) => p.id !== pres.id));
+    if (!error) {
+      setPresentations((prev) =>
+        prev.map((p) =>
+          p.id === pres.id ? { ...p, name: renameName.trim() } : p
+        )
+      );
     }
-    setDeleteId(null);
-  };
-
-  // ── Helpers ──
-  const showSuccess = (msg) => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(""), 4000);
-  };
-
-  const formatSize = (bytes) => {
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " Ko";
-    return (bytes / (1024 * 1024)).toFixed(1) + " Mo";
-  };
-
-  const formatDate = (iso) =>
-    new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
-
-  const filtered = presentations.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const presToDelete = presentations.find((p) => p.id === deleteId);
+    setRenameId(null);
+  }
 
   return (
-    <>
-      <style>{`
-        .pres-page { font-family: 'Plus Jakarta Sans', sans-serif; }
-
-        /* ── PAGE HEADER ── */
-        .pres-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
-        .pres-header-left h1 { font-size: 20px; font-weight: 700; color: #0b1f45; margin-bottom: 3px; }
-        .pres-header-left p  { font-size: 13px; color: #9ca3af; }
-        .btn-import { background: #0b1f45; color: #fff; border: none; border-radius: 10px; padding: 0 20px; height: 40px; font-size: 13.5px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.15s, transform 0.1s; white-space: nowrap; }
-        .btn-import:hover { background: #1a3a6e; transform: translateY(-1px); }
-        .btn-import:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-        /* ── ALERTS ── */
-        .alert-ok  { display: flex; align-items: center; gap: 9px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 11px 14px; font-size: 13px; color: #166534; font-weight: 500; margin-bottom: 1.25rem; }
-        .alert-err { display: flex; align-items: center; gap: 9px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 11px 14px; font-size: 13px; color: #991b1b; font-weight: 500; margin-bottom: 1.25rem; }
-
-        /* ── UPLOAD PROGRESS ── */
-        .upload-bar-wrap { background: #e8ecf4; border-radius: 99px; height: 5px; margin-bottom: 1.25rem; overflow: hidden; }
-        .upload-bar { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #1a5faa, #4da3ff); transition: width 0.4s ease; }
-
-        /* ── DROPZONE ── */
-        .dropzone { border: 2px dashed #c9d3e8; border-radius: 14px; padding: 2.5rem 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; margin-bottom: 1.5rem; background: #fff; }
-        .dropzone:hover, .dropzone.active { border-color: #1a5faa; background: #f0f6ff; }
-        .dropzone-icon { font-size: 40px; margin-bottom: 0.75rem; }
-        .dropzone h3 { font-size: 15px; font-weight: 700; color: #0b1f45; margin-bottom: 5px; }
-        .dropzone p  { font-size: 12.5px; color: #9ca3af; }
-        .dropzone .formats { display: inline-flex; gap: 6px; margin-top: 10px; }
-        .format-badge { background: #f0f4ff; border: 1px solid #dbeafe; border-radius: 6px; padding: 3px 10px; font-size: 11px; font-weight: 600; color: #1e40af; }
-
-        /* ── SEARCH + STATS ROW ── */
-        .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-        .search-input-wrap { position: relative; flex: 1; max-width: 320px; }
-        .search-input-wrap span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 15px; }
-        .search-input { width: 100%; border: 1.5px solid #e5e7eb; border-radius: 9px; padding: 9px 13px 9px 38px; font-size: 13px; font-family: 'Plus Jakarta Sans', sans-serif; color: #111827; background: #fff; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
-        .search-input:focus { border-color: #1a5faa; box-shadow: 0 0 0 3px rgba(26,95,170,0.1); }
-        .search-input::placeholder { color: #9ca3af; }
-        .count-label { font-size: 13px; color: #9ca3af; font-weight: 500; white-space: nowrap; }
-
-        /* ── GRID ── */
-        .pres-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
-
-        /* ── CARD ── */
-        .pres-card { background: #fff; border: 1px solid #e8ecf4; border-radius: 14px; overflow: hidden; transition: box-shadow 0.2s, transform 0.15s; display: flex; flex-direction: column; }
-        .pres-card:hover { box-shadow: 0 6px 24px rgba(11,31,69,0.1); transform: translateY(-2px); }
-
-        .card-thumb { height: 130px; display: flex; align-items: center; justify-content: center; position: relative; }
-        .thumb-pptx { background: linear-gradient(135deg, #fff1f2, #fce7f3); }
-        .thumb-pdf  { background: linear-gradient(135deg, #fef3c7, #fde68a); }
-        .thumb-icon { font-size: 52px; }
-        .thumb-type { position: absolute; top: 10px; right: 10px; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .type-pptx { background: #fce7f3; color: #be185d; }
-        .type-pdf  { background: #fef3c7; color: #92400e; }
-
-        .card-body-inner { padding: 1rem; flex: 1; display: flex; flex-direction: column; gap: 6px; }
-        .card-name { font-size: 13.5px; font-weight: 700; color: #0b1f45; line-height: 1.35; word-break: break-word; }
-        .card-meta { font-size: 11.5px; color: #9ca3af; display: flex; align-items: center; gap: 8px; }
-        .card-meta span { display: flex; align-items: center; gap: 3px; }
-
-        .card-actions { display: flex; gap: 6px; padding: 0.75rem 1rem; border-top: 1px solid #f0f2f8; }
-        .btn-action { flex: 1; padding: 7px; border-radius: 8px; font-size: 12px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 5px; transition: background 0.15s, color 0.15s; }
-        .btn-open   { background: #eff6ff; color: #1e40af; }
-        .btn-open:hover { background: #dbeafe; }
-        .btn-delete { background: #fef2f2; color: #ef4444; }
-        .btn-delete:hover { background: #fee2e2; }
-
-        /* ── EMPTY STATE ── */
-        .empty-state { text-align: center; padding: 4rem 1rem; color: #9ca3af; }
-        .empty-state .empty-icon { font-size: 56px; margin-bottom: 1rem; }
-        .empty-state h3 { font-size: 16px; font-weight: 700; color: #0b1f45; margin-bottom: 6px; }
-        .empty-state p  { font-size: 13px; }
-
-        /* ── SKELETON ── */
-        .skeleton { border-radius: 14px; background: linear-gradient(90deg, #f0f2f8 25%, #e8ecf4 50%, #f0f2f8 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-
-        /* ── MODAL ── */
-        .modal-overlay { position: fixed; inset: 0; background: rgba(11,31,69,0.45); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 1rem; backdrop-filter: blur(2px); }
-        .modal-box { background: #fff; border-radius: 16px; padding: 2rem; max-width: 400px; width: 100%; box-shadow: 0 20px 60px rgba(11,31,69,0.2); }
-        .modal-icon { font-size: 40px; text-align: center; margin-bottom: 1rem; }
-        .modal-title { font-size: 17px; font-weight: 700; color: #0b1f45; text-align: center; margin-bottom: 6px; }
-        .modal-sub   { font-size: 13px; color: #6b7280; text-align: center; margin-bottom: 1.5rem; line-height: 1.6; }
-        .modal-name  { font-weight: 700; color: #0b1f45; }
-        .modal-btns  { display: flex; gap: 10px; }
-        .btn-cancel  { flex: 1; padding: 11px; border-radius: 9px; border: 1.5px solid #e5e7eb; background: transparent; font-size: 13.5px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; color: #374151; cursor: pointer; transition: border-color 0.15s; }
-        .btn-cancel:hover { border-color: #9ca3af; }
-        .btn-confirm-del { flex: 1; padding: 11px; border-radius: 9px; border: none; background: #ef4444; font-size: 13.5px; font-weight: 600; font-family: 'Plus Jakarta Sans', sans-serif; color: #fff; cursor: pointer; transition: background 0.15s; }
-        .btn-confirm-del:hover { background: #dc2626; }
-      `}</style>
-
-      <div className="pres-page">
-
-        {/* Header */}
-        <div className="pres-header">
-          <div className="pres-header-left">
-            <h1>🖥️ Mes Présentations</h1>
-            <p>Importez et gérez vos fichiers PowerPoint et PDF.</p>
-          </div>
-          <button
-            className="btn-import"
-            onClick={() => fileInputRef.current.click()}
-            disabled={uploading}
-          >
-            {uploading ? (
-              <><span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" /> Import en cours...</>
-            ) : (
-              <> ＋ Importer une présentation</>
-            )}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pptx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            style={{ display: "none" }}
-            onChange={(e) => handleUpload(e.target.files[0])}
-          />
+    <div style={styles.page}>
+      {/* Header */}
+      <div style={styles.header}>
+        <div>
+          <h1 style={styles.h1}>Mes présentations</h1>
+          <p style={styles.subtitle}>Gérez et lancez vos slides via gestes</p>
         </div>
-
-        {/* Alerts */}
-        {successMsg && <div className="alert-ok">✅ {successMsg}</div>}
-        {errorMsg   && <div className="alert-err">⚠️ {errorMsg} <button onClick={() => setErrorMsg("")} style={{ marginLeft:"auto", background:"none", border:"none", cursor:"pointer", color:"#991b1b", fontWeight:700 }}>✕</button></div>}
-
-        {/* Upload progress */}
-        {uploading && (
-          <div style={{ marginBottom: "1.25rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12.5, color: "#374151", fontWeight: 600 }}>
-                {uploadProgress < 92 ? "⬆️ Upload en cours…" : uploadProgress < 100 ? "🔗 Finalisation…" : "✅ Terminé"}
-              </span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#1a5faa" }}>{uploadProgress}%</span>
-            </div>
-            <div className="upload-bar-wrap">
-              <div className="upload-bar" style={{ width: `${uploadProgress}%` }} />
-            </div>
-          </div>
-        )}
-
-        {/* Dropzone */}
-        <div
-          className={`dropzone ${dragOver ? "active" : ""}`}
-          onClick={() => fileInputRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            handleUpload(e.dataTransfer.files[0]);
-          }}
+        <button
+          style={styles.btnPrimary}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
         >
-          <div className="dropzone-icon">📂</div>
-          <h3>Glissez votre fichier ici</h3>
-          <p>ou cliquez pour parcourir vos fichiers</p>
-          <div className="formats">
-            <span className="format-badge">📊 PPTX</span>
-            <span className="format-badge">📄 PDF</span>
-            <span style={{ fontSize: 12, color: "#9ca3af", alignSelf: "center" }}>— max 200 Mo</span>
-          </div>
-        </div>
+          {uploading ? "Upload..." : "⬆ Importer .pptx"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pptx"
+          style={{ display: "none" }}
+          onChange={(e) => handleUpload(e.target.files[0])}
+        />
+      </div>
 
-        {/* Toolbar */}
-        <div className="toolbar">
-          <div className="search-input-wrap">
-            <span>🔍</span>
-            <input
-              className="search-input"
-              type="text"
-              placeholder="Rechercher une présentation..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <span className="count-label">
-            {filtered.length} présentation{filtered.length !== 1 ? "s" : ""}
+      {/* Erreur */}
+      {error && <div style={styles.errorBanner}>{error}</div>}
+
+      {/* Drop Zone */}
+      <div
+        style={{
+          ...styles.dropZone,
+          ...(dragging ? styles.dropZoneActive : {}),
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          handleUpload(e.dataTransfer.files[0]);
+        }}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <span style={{ fontSize: 32 }}>📁</span>
+        <p style={styles.dropZoneTitle}>
+          {uploading ? "Chargement..." : "Glissez un fichier .pptx ici"}
+        </p>
+        <p style={styles.dropZoneSub}>ou cliquez pour parcourir — max 50 MB</p>
+      </div>
+
+      {/* Compteur */}
+      <p style={styles.sectionLabel}>
+        {loading
+          ? "Chargement..."
+          : `${presentations.length} présentation${
+              presentations.length !== 1 ? "s" : ""
+            }`}
+      </p>
+
+      {/* État vide */}
+      {!loading && presentations.length === 0 && (
+        <div style={styles.emptyState}>
+          <span style={{ fontSize: 48, display: "block", marginBottom: 12 }}>
+            🎞️
           </span>
+          <p style={{ color: "#94A3B8" }}>
+            Aucune présentation. Importez votre premier .pptx !
+          </p>
         </div>
+      )}
 
-        {/* Content */}
-        {loading ? (
-          <div className="pres-grid">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="skeleton" style={{ height: 220 }} />
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🗂️</div>
-            <h3>{search ? "Aucun résultat trouvé" : "Aucune présentation importée"}</h3>
-            <p>{search ? "Essayez un autre mot-clé." : "Cliquez sur « Importer » ou glissez un fichier pour commencer."}</p>
-          </div>
-        ) : (
-          <div className="pres-grid">
-            {filtered.map((pres) => (
-              <div className="pres-card" key={pres.id}>
-                {/* Thumbnail */}
-                <div className={`card-thumb ${pres.file_type === "pdf" ? "thumb-pdf" : "thumb-pptx"}`}>
-                  <span className="thumb-icon">
-                    {pres.file_type === "pdf" ? "📄" : "📊"}
-                  </span>
-                  <span className={`thumb-type ${pres.file_type === "pdf" ? "type-pdf" : "type-pptx"}`}>
-                    {pres.file_type}
-                  </span>
-                </div>
+      {/* Grille */}
+      <div style={styles.grid}>
+        {presentations.map((pres) => {
+          const color = colorFor(pres.name);
+          const isRenaming = renameId === pres.id;
+          const ready = pres.slides_ready;
+          return (
+            <div key={pres.id} style={styles.card}>
+              {/* Miniature */}
+              <div
+                style={{
+                  ...styles.thumb,
+                  background: color.bg,
+                  color: color.text,
+                }}
+              >
+                {initials(pres.name)}
+                {!ready && (
+                  <span style={styles.convertingBadge}>Conversion…</span>
+                )}
+              </div>
 
-                {/* Info */}
-                <div className="card-body-inner">
-                  <p className="card-name">{pres.name}</p>
-                  <div className="card-meta">
-                    <span>🗓️ {formatDate(pres.created_at)}</span>
-                    <span>💾 {formatSize(pres.file_size)}</span>
-                  </div>
-                </div>
+              {/* Corps */}
+              <div style={styles.cardBody}>
+                {isRenaming ? (
+                  <input
+                    style={styles.renameInput}
+                    value={renameName}
+                    autoFocus
+                    onChange={(e) => setRenameName(e.target.value)}
+                    onBlur={() => handleRename(pres)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRename(pres);
+                      if (e.key === "Escape") setRenameId(null);
+                    }}
+                  />
+                ) : (
+                  <p style={styles.cardName}>{pres.name}</p>
+                )}
 
-                {/* Actions */}
-                <div className="card-actions">
+                <p style={styles.cardMeta}>
+                  {formatSize(pres.file_size)} · {formatDate(pres.created_at)}
+                  {ready && pres.slide_count ? ` · ${pres.slide_count} slides` : ""}
+                </p>
+
+                <div style={styles.cardActions}>
                   <button
-                    className="btn-action btn-open"
-                    onClick={() => setViewingPres(pres)}
+                    style={{
+                      ...styles.btnOpen,
+                      ...(ready ? {} : styles.btnDisabled),
+                    }}
+                    disabled={!ready}
+                    onClick={() => navigate(`/viewer/${pres.id}`)}
                   >
-                    👁️ Ouvrir
+                    {ready ? "▶ Lancer" : "⏳ Conversion…"}
                   </button>
                   <button
-                    className="btn-action btn-delete"
-                    onClick={() => setDeleteId(pres.id)}
+                    style={styles.btnIcon}
+                    title="Renommer"
+                    onClick={() => {
+                      setRenameId(pres.id);
+                      setRenameName(pres.name);
+                    }}
                   >
-                    🗑️ Supprimer
+                    ✏️
+                  </button>
+                  <button
+                    style={{ ...styles.btnIcon, ...styles.btnDanger }}
+                    title="Supprimer"
+                    onClick={() => handleDelete(pres)}
+                  >
+                    🗑
                   </button>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── VIEWER PLEIN ÉCRAN ── */}
-      {viewingPres && (
-        <PresentationViewer
-          pres={viewingPres}
-          onClose={() => setViewingPres(null)}
-        />
-      )}
-
-      {/* ── MODAL CONFIRMATION SUPPRESSION ── */}
-      {deleteId && presToDelete && (
-        <div className="modal-overlay" onClick={() => setDeleteId(null)}>
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon">🗑️</div>
-            <p className="modal-title">Supprimer la présentation ?</p>
-            <p className="modal-sub">
-              Vous êtes sur le point de supprimer{" "}
-              <span className="modal-name">« {presToDelete.name} »</span>.
-              <br />Cette action est irréversible.
-            </p>
-            <div className="modal-btns">
-              <button className="btn-cancel" onClick={() => setDeleteId(null)}>Annuler</button>
-              <button className="btn-confirm-del" onClick={() => handleDelete(presToDelete)}>
-                Supprimer
-              </button>
             </div>
-          </div>
-        </div>
-      )}
-    </>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
-export default Presentations;
+const styles = {
+  page: {
+    padding: "2rem 1.5rem",
+    maxWidth: 960,
+    margin: "0 auto",
+    fontFamily: "Inter, sans-serif",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "2rem",
+  },
+  h1: { fontSize: 24, fontWeight: 700, color: "#0F172A", margin: 0 },
+  subtitle: { fontSize: 13, color: "#64748B", marginTop: 4 },
+  btnPrimary: {
+    background: "#6366F1",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "10px 18px",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  errorBanner: {
+    background: "#FEF2F2",
+    color: "#DC2626",
+    border: "1px solid #FECACA",
+    borderRadius: 8,
+    padding: "10px 14px",
+    marginBottom: 16,
+    fontSize: 14,
+  },
+  dropZone: {
+    border: "1.5px dashed #CBD5E1",
+    borderRadius: 12,
+    padding: "2rem",
+    textAlign: "center",
+    marginBottom: "2rem",
+    background: "#F8FAFC",
+    cursor: "pointer",
+    transition: "border-color 0.15s",
+  },
+  dropZoneActive: { borderColor: "#6366F1", background: "#EEF2FF" },
+  dropZoneTitle: {
+    color: "#6366F1",
+    fontWeight: 600,
+    marginTop: 8,
+    fontSize: 15,
+  },
+  dropZoneSub: { fontSize: 13, color: "#94A3B8", marginTop: 4 },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    marginBottom: 12,
+  },
+  emptyState: { textAlign: "center", padding: "3rem 1rem" },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+    gap: 14,
+  },
+  card: {
+    background: "#fff",
+    border: "0.5px solid #E2E8F0",
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  thumb: {
+    position: "relative",
+    height: 110,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 34,
+    fontWeight: 700,
+    letterSpacing: -1,
+  },
+  convertingBadge: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    fontSize: 10,
+    fontWeight: 700,
+    background: "rgba(15,23,42,0.75)",
+    color: "#fff",
+    padding: "3px 8px",
+    borderRadius: 12,
+    letterSpacing: 0,
+  },
+  cardBody: { padding: "12px 14px" },
+  cardName: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#0F172A",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    margin: 0,
+  },
+  cardMeta: { fontSize: 12, color: "#64748B", marginTop: 4 },
+  cardActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 12,
+  },
+  btnOpen: {
+    flex: 1,
+    background: "#6366F1",
+    color: "#fff",
+    border: "none",
+    borderRadius: 8,
+    padding: "7px 0",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  btnDisabled: {
+    background: "#CBD5E1",
+    cursor: "not-allowed",
+  },
+  btnIcon: {
+    width: 32,
+    height: 32,
+    border: "0.5px solid #E2E8F0",
+    borderRadius: 8,
+    background: "#F8FAFC",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    fontSize: 15,
+  },
+  btnDanger: { background: "#FEF2F2", borderColor: "#FECACA" },
+  renameInput: {
+    width: "100%",
+    fontSize: 14,
+    fontWeight: 600,
+    border: "1.5px solid #6366F1",
+    borderRadius: 6,
+    padding: "3px 6px",
+    outline: "none",
+    color: "#0F172A",
+  },
+};

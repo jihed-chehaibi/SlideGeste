@@ -2,15 +2,13 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
-// npm install bootstrap
-// main.jsx : import 'bootstrap/dist/css/bootstrap.min.css';
-// Place LogoSlideGeste.png dans src/assets/
 import logo from "../assets/Logo2.png";
 
 function SignIn() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
 
   const handleSignIn = async (e) => {
@@ -29,7 +27,6 @@ function SignIn() {
       return;
     }
 
-    console.log(data);
     navigate("/dashboard");
   };
 
@@ -37,6 +34,35 @@ function SignIn() {
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+        /* ── Custom easing curves (Emil: never use built-in easings) ── */
+        :root {
+          --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+          --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+        }
+
+        /* ── Page entry ── */
+        @keyframes cardEnter {
+          from {
+            opacity: 0;
+            transform: translateY(16px) scale(0.98);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        @keyframes fadeSlideUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
 
         .signin-page {
           min-height: 100vh;
@@ -55,6 +81,8 @@ function SignIn() {
           overflow: hidden;
           max-width: 960px;
           width: 100%;
+          /* Card enters from below — nothing in the real world appears from nothing */
+          animation: cardEnter 420ms var(--ease-out-strong) both;
         }
 
         /* ── Panneau gauche ── */
@@ -98,6 +126,8 @@ function SignIn() {
           filter: brightness(0) invert(1);
           position: relative;
           z-index: 1;
+          /* Logo entre avec le panneau — pas d'animation séparée */
+          opacity: 1;
         }
 
         .left-title {
@@ -119,6 +149,7 @@ function SignIn() {
           z-index: 1;
         }
 
+        /* ── Feature items avec stagger (Emil: jamais tout en même temps) ── */
         .feature-item {
           display: flex;
           align-items: center;
@@ -128,7 +159,13 @@ function SignIn() {
           margin-bottom: 12px;
           position: relative;
           z-index: 1;
+          opacity: 0;
+          animation: fadeSlideUp 360ms var(--ease-out-strong) both;
         }
+
+        .feature-item:nth-child(1) { animation-delay: 180ms; }
+        .feature-item:nth-child(2) { animation-delay: 240ms; }
+        .feature-item:nth-child(3) { animation-delay: 300ms; }
 
         .feature-icon {
           width: 22px;
@@ -156,6 +193,8 @@ function SignIn() {
           width: 145px;
           object-fit: contain;
           margin-bottom: 1.75rem;
+          opacity: 0;
+          animation: fadeSlideUp 340ms var(--ease-out-strong) 80ms both;
         }
 
         .form-heading {
@@ -163,12 +202,21 @@ function SignIn() {
           font-weight: 700;
           color: #0f346d;
           margin-bottom: 4px;
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 120ms both;
         }
 
         .form-subheading {
           font-size: 13px;
           color: #6b7280;
           margin-bottom: 1.75rem;
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 150ms both;
+        }
+
+        .form-body {
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 190ms both;
         }
 
         .custom-label {
@@ -189,7 +237,11 @@ function SignIn() {
           font-family: 'Plus Jakarta Sans', sans-serif !important;
           color: #111827 !important;
           background: #f9fafb !important;
-          transition: border-color 0.2s, box-shadow 0.2s !important;
+          /* Emil: spécifier les propriétés exactes, jamais 'transition: all' */
+          transition:
+            border-color 160ms var(--ease-out-strong),
+            box-shadow 160ms var(--ease-out-strong),
+            background-color 160ms var(--ease-out-strong) !important;
         }
 
         .custom-input:focus {
@@ -203,11 +255,21 @@ function SignIn() {
           color: #9ca3af;
         }
 
+        /* Emil: hover uniquement sur pointeur précis (pas tactile) */
+        @media (hover: hover) and (pointer: fine) {
+          .custom-input:hover:not(:focus) {
+            border-color: #d1d5db !important;
+            background: #fff !important;
+          }
+        }
+
         .forgot-link {
           font-size: 12px;
           color: #1a5faa;
           text-decoration: none;
           font-weight: 500;
+          /* Transition précise sur color uniquement */
+          transition: color 140ms var(--ease-out-strong);
         }
 
         .forgot-link:hover {
@@ -224,21 +286,37 @@ function SignIn() {
           font-weight: 600 !important;
           font-family: 'Plus Jakarta Sans', sans-serif !important;
           color: #fff !important;
-          transition: opacity 0.2s, transform 0.15s !important;
           letter-spacing: 0.02em !important;
+          /* Emil: spécifier transform + box-shadow séparément, jamais 'all' */
+          transition:
+            opacity 180ms var(--ease-out-strong),
+            transform 160ms var(--ease-out-strong),
+            box-shadow 180ms var(--ease-out-strong) !important;
         }
 
-        .btn-signin:hover:not(:disabled) {
-          opacity: 0.88 !important;
-          transform: translateY(-1px) !important;
+        /* Emil: hover uniquement sur pointer précis */
+        @media (hover: hover) and (pointer: fine) {
+          .btn-signin:hover:not(:disabled) {
+            opacity: 0.92 !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 16px rgba(15, 52, 109, 0.28) !important;
+          }
         }
 
-        .btn-signin:active {
-          transform: scale(0.98) !important;
+        /* Emil: ':active' obligatoire — le bouton doit répondre à la pression */
+        .btn-signin:active:not(:disabled) {
+          transform: scale(0.97) !important;
+          box-shadow: none !important;
+          opacity: 1 !important;
+          transition:
+            transform 100ms var(--ease-out-strong),
+            box-shadow 100ms var(--ease-out-strong),
+            opacity 100ms var(--ease-out-strong) !important;
         }
 
         .btn-signin:disabled {
           opacity: 0.65 !important;
+          cursor: not-allowed !important;
         }
 
         .divider-text {
@@ -253,11 +331,35 @@ function SignIn() {
           color: #1a5faa;
           font-weight: 600;
           text-decoration: none;
+          transition: color 140ms var(--ease-out-strong);
         }
 
         .signup-link:hover {
           color: #0f346d;
           text-decoration: underline;
+        }
+.toggle-password {
+  color: #9ca3af;
+  transition: color 140ms var(--ease-out-strong);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toggle-password:hover {
+    color: #374151 !important;
+  }
+}
+        /* Emil: prefers-reduced-motion — supprimer le mouvement, garder l'opacité */
+        @media (prefers-reduced-motion: reduce) {
+          .signin-card,
+          .feature-item,
+          .right-logo,
+          .form-heading,
+          .form-subheading,
+          .form-body {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
         }
       `}</style>
 
@@ -272,7 +374,7 @@ function SignIn() {
                 Content de vous<br />revoir !
               </h2>
               <p className="left-sub">
-                Connectez-vous à votre espace SlideGeste et reprenez là où vous êtes arrêté .
+                Connectez-vous à votre espace SlideGeste et reprenez là où vous êtes arrêté.
               </p>
               <div>
                 {[
@@ -297,67 +399,104 @@ function SignIn() {
                 Bienvenue ! Entrez vos identifiants pour accéder à votre compte.
               </p>
 
-              <form onSubmit={handleSignIn}>
-                <div className="mb-3">
-                  <label className="custom-label">Adresse email</label>
-                  <input
-                    type="email"
-                    className="form-control custom-input"
-                    placeholder="Jihed@exemple.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+              <div className="form-body">
+                <form onSubmit={handleSignIn}>
+                  <div className="mb-3">
+                    <label className="custom-label">Adresse email</label>
+                    <input
+                      type="email"
+                      className="form-control custom-input"
+                      placeholder="vous@exemple.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="mb-2">
+  <label className="custom-label">Mot de passe</label>
+  <div style={{ position: "relative" }}>
+    <input
+      type={showPassword ? "text" : "password"}
+      className="form-control custom-input"
+      placeholder="••••••••"
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+      required
+      style={{ paddingRight: "42px" }}
+    />
+    <button
+      type="button"
+      onClick={() => setShowPassword((v) => !v)}
+      style={{
+        position: "absolute",
+        right: "12px",
+        top: "50%",
+        transform: "translateY(-50%)",
+        background: "none",
+        border: "none",
+        padding: "0",
+        cursor: "pointer",
+        color: "#9ca3af",
+        display: "flex",
+        alignItems: "center",
+        transition: "color 140ms var(--ease-out-strong)",
+      }}
+      aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+    >
+      {showPassword ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      )}
+    </button>
+  </div>
+</div>
+
+                  <div className="text-end mb-4">
+                    <a href="/forgot-password" className="forgot-link">
+                      Mot de passe oublié ?
+                    </a>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-signin w-100 mb-3"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                          aria-hidden="true"
+                        ></span>
+                        Connexion en cours...
+                      </>
+                    ) : (
+                      "Se connecter →"
+                    )}
+                  </button>
+                </form>
+
+                <div className="d-flex align-items-center gap-2 my-2">
+                  <hr className="flex-grow-1 m-0" />
+                  <span className="divider-text">ou</span>
+                  <hr className="flex-grow-1 m-0" />
                 </div>
 
-                <div className="mb-2">
-                  <label className="custom-label">Mot de passe</label>
-                  <input
-                    type="password"
-                    className="form-control custom-input"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="text-end mb-4">
-                  <a href="/forgot-password" className="forgot-link">
-                    Mot de passe oublié ?
-                  </a>
-                </div>
-
-                <button
-                  type="submit"
-                  className="btn btn-signin w-100 mb-3"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <span
-                        className="spinner-border spinner-border-sm me-2"
-                        role="status"
-                        aria-hidden="true"
-                      ></span>
-                      Connexion en cours...
-                    </>
-                  ) : (
-                    "Se connecter →"
-                  )}
-                </button>
-              </form>
-
-              <div className="d-flex align-items-center gap-2 my-2">
-                <hr className="flex-grow-1 m-0" />
-                <span className="divider-text">ou</span>
-                <hr className="flex-grow-1 m-0" />
+                <p className="text-center mt-3 mb-0" style={{ fontSize: "13px", color: "#6b7280" }}>
+                  Pas encore de compte ?{" "}
+                  <a href="/signup" className="signup-link">S'inscrire gratuitement</a>
+                </p>
               </div>
-
-              <p className="text-center mt-3 mb-0" style={{ fontSize: "13px", color: "#6b7280" }}>
-                Pas encore de compte ?{" "}
-                <a href="/signup" className="signup-link">S'inscrire gratuitement</a>
-              </p>
             </div>
 
           </div>

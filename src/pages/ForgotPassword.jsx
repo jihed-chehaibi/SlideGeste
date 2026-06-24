@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-
-// npm install bootstrap
-// main.jsx : import 'bootstrap/dist/css/bootstrap.min.css';
-// Place LogoSlideGeste.png dans src/assets/
 import logo from "../assets/Logo2.png";
 
 function ForgotPassword() {
@@ -36,6 +32,32 @@ function ForgotPassword() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 
+        :root {
+          --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+        }
+
+        @keyframes cardEnter {
+          from {
+            opacity: 0;
+            transform: translateY(16px) scale(0.98);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        @keyframes fadeSlideUp {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
         .fp-page {
           min-height: 100vh;
           background: #f0f4ff;
@@ -53,6 +75,7 @@ function ForgotPassword() {
           overflow: hidden;
           max-width: 960px;
           width: 100%;
+          animation: cardEnter 420ms var(--ease-out-strong) both;
         }
 
         /* ── Panneau gauche ── */
@@ -99,18 +122,20 @@ function ForgotPassword() {
         }
 
         .left-icon-wrap {
-          width: 64px;
-          height: 64px;
-          border-radius: 16px;
+          width: 56px;
+          height: 56px;
+          border-radius: 14px;
           background: rgba(255,255,255,0.12);
           border: 1px solid rgba(255,255,255,0.2);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 28px;
+          font-size: 24px;
           margin-bottom: 1.5rem;
           position: relative;
           z-index: 1;
+          opacity: 0;
+          animation: fadeSlideUp 340ms var(--ease-out-strong) 60ms both;
         }
 
         .left-title {
@@ -132,6 +157,7 @@ function ForgotPassword() {
           z-index: 1;
         }
 
+        /* ── Steps avec stagger ── */
         .step-item {
           display: flex;
           align-items: flex-start;
@@ -141,7 +167,13 @@ function ForgotPassword() {
           margin-bottom: 14px;
           position: relative;
           z-index: 1;
+          opacity: 0;
+          animation: fadeSlideUp 360ms var(--ease-out-strong) both;
         }
+
+        .step-item:nth-child(1) { animation-delay: 200ms; }
+        .step-item:nth-child(2) { animation-delay: 260ms; }
+        .step-item:nth-child(3) { animation-delay: 320ms; }
 
         .step-number {
           width: 22px;
@@ -187,6 +219,8 @@ function ForgotPassword() {
           width: 145px;
           object-fit: contain;
           margin-bottom: 1.75rem;
+          opacity: 0;
+          animation: fadeSlideUp 340ms var(--ease-out-strong) 80ms both;
         }
 
         .form-heading {
@@ -194,6 +228,8 @@ function ForgotPassword() {
           font-weight: 700;
           color: #0f346d;
           margin-bottom: 4px;
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 120ms both;
         }
 
         .form-subheading {
@@ -201,6 +237,13 @@ function ForgotPassword() {
           color: #6b7280;
           margin-bottom: 1.75rem;
           line-height: 1.6;
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 150ms both;
+        }
+
+        .form-body {
+          opacity: 0;
+          animation: fadeSlideUp 320ms var(--ease-out-strong) 190ms both;
         }
 
         .info-box {
@@ -241,7 +284,10 @@ function ForgotPassword() {
           font-family: 'Plus Jakarta Sans', sans-serif !important;
           color: #111827 !important;
           background: #f9fafb !important;
-          transition: border-color 0.2s, box-shadow 0.2s !important;
+          transition:
+            border-color 160ms var(--ease-out-strong),
+            box-shadow 160ms var(--ease-out-strong),
+            background-color 160ms var(--ease-out-strong) !important;
         }
 
         .custom-input:focus {
@@ -255,6 +301,14 @@ function ForgotPassword() {
           color: #9ca3af;
         }
 
+        @media (hover: hover) and (pointer: fine) {
+          .custom-input:hover:not(:focus) {
+            border-color: #d1d5db !important;
+            background: #fff !important;
+          }
+        }
+
+        /* ── Bouton principal ── */
         .btn-send {
           background: linear-gradient(135deg, #0f346d, #1a5faa) !important;
           border: none !important;
@@ -264,23 +318,37 @@ function ForgotPassword() {
           font-weight: 600 !important;
           font-family: 'Plus Jakarta Sans', sans-serif !important;
           color: #fff !important;
-          transition: opacity 0.2s, transform 0.15s !important;
           letter-spacing: 0.02em !important;
+          transition:
+            opacity 180ms var(--ease-out-strong),
+            transform 160ms var(--ease-out-strong),
+            box-shadow 180ms var(--ease-out-strong) !important;
         }
 
-        .btn-send:hover:not(:disabled) {
-          opacity: 0.88 !important;
-          transform: translateY(-1px) !important;
+        @media (hover: hover) and (pointer: fine) {
+          .btn-send:hover:not(:disabled) {
+            opacity: 0.92 !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 4px 16px rgba(15, 52, 109, 0.28) !important;
+          }
         }
 
-        .btn-send:active {
-          transform: scale(0.98) !important;
+        .btn-send:active:not(:disabled) {
+          transform: scale(0.97) !important;
+          box-shadow: none !important;
+          opacity: 1 !important;
+          transition:
+            transform 100ms var(--ease-out-strong),
+            box-shadow 100ms var(--ease-out-strong),
+            opacity 100ms var(--ease-out-strong) !important;
         }
 
         .btn-send:disabled {
           opacity: 0.65 !important;
+          cursor: not-allowed !important;
         }
 
+        /* ── Bouton retour ── */
         .btn-back {
           background: transparent !important;
           border: 1.5px solid #e5e7eb !important;
@@ -290,24 +358,51 @@ function ForgotPassword() {
           font-weight: 600 !important;
           font-family: 'Plus Jakarta Sans', sans-serif !important;
           color: #374151 !important;
-          transition: border-color 0.2s, background 0.2s !important;
+          transition:
+            border-color 160ms var(--ease-out-strong),
+            background-color 160ms var(--ease-out-strong),
+            color 160ms var(--ease-out-strong),
+            transform 160ms var(--ease-out-strong) !important;
         }
 
-        .btn-back:hover {
-          background: #f9fafb !important;
-          border-color: #1a5faa !important;
-          color: #1a5faa !important;
+        @media (hover: hover) and (pointer: fine) {
+          .btn-back:hover {
+            background: #f9fafb !important;
+            border-color: #1a5faa !important;
+            color: #1a5faa !important;
+          }
+        }
+
+        .btn-back:active {
+          transform: scale(0.97) !important;
+          transition: transform 100ms var(--ease-out-strong) !important;
         }
 
         .signin-link {
           color: #1a5faa;
           font-weight: 600;
           text-decoration: none;
+          transition: color 140ms var(--ease-out-strong);
         }
 
         .signin-link:hover {
           color: #0f346d;
           text-decoration: underline;
+        }
+
+        /* ── prefers-reduced-motion ── */
+        @media (prefers-reduced-motion: reduce) {
+          .fp-card,
+          .left-icon-wrap,
+          .step-item,
+          .right-logo,
+          .form-heading,
+          .form-subheading,
+          .form-body {
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+          }
         }
       `}</style>
 
@@ -351,58 +446,60 @@ function ForgotPassword() {
                 Entrez votre adresse email et nous vous enverrons un lien pour réinitialiser votre mot de passe.
               </p>
 
-              <div className="info-box">
-                <span className="info-icon">ℹ️</span>
-                <span>
-                  Le lien de réinitialisation expirera après <strong>1 heure</strong>. Vérifiez aussi vos spams si vous ne recevez pas l'email.
-                </span>
-              </div>
-
-              <form onSubmit={handleForgotPassword}>
-                <div className="mb-4">
-                  <label className="custom-label">Adresse email</label>
-                  <input
-                    type="email"
-                    className="form-control custom-input"
-                    placeholder="jean@exemple.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                  />
+              <div className="form-body">
+                <div className="info-box">
+                  <span className="info-icon">ℹ️</span>
+                  <span>
+                    Le lien expirera après <strong>1 heure</strong>. Vérifiez aussi vos spams si vous ne recevez pas l'email.
+                  </span>
                 </div>
 
-                <button
-                  type="submit"
-                  className="btn btn-send w-100 mb-3"
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <>
-                      <span
-                        className="spinner-border spinner-border-sm me-2"
-                        role="status"
-                        aria-hidden="true"
-                      ></span>
-                      Envoi en cours...
-                    </>
-                  ) : (
-                    "Envoyer le lien de réinitialisation →"
-                  )}
-                </button>
+                <form onSubmit={handleForgotPassword}>
+                  <div className="mb-4">
+                    <label className="custom-label">Adresse email</label>
+                    <input
+                      type="email"
+                      className="form-control custom-input"
+                      placeholder="vous@exemple.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
 
-                <button
-                  type="button"
-                  className="btn btn-back w-100"
-                  onClick={() => navigate("/signin")}
-                >
-                  ← Retour à la connexion
-                </button>
-              </form>
+                  <button
+                    type="submit"
+                    className="btn btn-send w-100 mb-3"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                          aria-hidden="true"
+                        ></span>
+                        Envoi en cours...
+                      </>
+                    ) : (
+                      "Envoyer le lien de réinitialisation →"
+                    )}
+                  </button>
 
-              <p className="text-center mt-4 mb-0" style={{ fontSize: "13px", color: "#6b7280" }}>
-                Pas encore de compte ?{" "}
-                <a href="/signup" className="signin-link">S'inscrire gratuitement</a>
-              </p>
+                  <button
+                    type="button"
+                    className="btn btn-back w-100"
+                    onClick={() => navigate("/signin")}
+                  >
+                    ← Retour à la connexion
+                  </button>
+                </form>
+
+                <p className="text-center mt-4 mb-0" style={{ fontSize: "13px", color: "#6b7280" }}>
+                  Pas encore de compte ?{" "}
+                  <a href="/signup" className="signin-link">S'inscrire gratuitement</a>
+                </p>
+              </div>
             </div>
 
           </div>

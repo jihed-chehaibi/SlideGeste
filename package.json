@@ -12,10 +12,17 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",
     "bootstrap": "^5.3.8",
+    "fast-xml-parser": "^5.9.3",
+    "framer-motion": "^12.40.0",
     "jszip": "^3.10.1",
+    "lucide-react": "^1.21.0",
     "pdfjs-dist": "^6.0.227",
+    "pptx-preview": "^1.0.7",
+    "pptx-react-viewer": "^1.1.23",
+    "pptx-viewer-core": "^1.1.23",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-icons": "^5.6.0",
     "react-pdf": "^10.4.1",
     "react-router-dom": "^7.16.0",
     "recharts": "^3.8.1"
